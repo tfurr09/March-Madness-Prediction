@@ -1,0 +1,516 @@
+---
+title: "DATA 498 Project"
+author: "Taylor Furry"
+date: "4/14/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# This formula installs the package gsheet if necessary. Gsheet allows you to take data from a google sheets file. The data should come up with this chunk of code.
+if(!require(gsheet)){
+  install.packages('gsheet')
+  library(gsheet)
+}
+
+cbb <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1AMR6z0PniS-m7Nnt7A0X2mkTn4mlXKauQRcApCZfGOw/edit?usp=sharing')
+cbb21 <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1Zd416tjt8ljbSv9aaXbi3vDgi7HDp7OoOBhc6Ncrf-A/edit?usp=sharing')
+```
+
+```{r}
+# This just gives a cursory look at all of the data. We are going to have to fix and clean some of the data later on to work for our models. The list of variables is given below this chunk.
+summary(cbb) # Seed has some NA's that will need to be taken care of. 
+head(cbb)
+```
+
+Variables are as follows
+Team: The Division 1 college basketball school
+Conf: The school in which the school participates
+G: Number of games played
+W: Number of games won
+ADJOE: Adjusted offensive efficiency. An estimate of of the offensive efficiency (points scored per 100 possessions) a team would have against the average D1 defense (higher is better)
+ADJDE: Adjusted defensive efficiency. An estimate of of the defensive efficiency (points allowed per 100 possessions) a team would have against the average D1 offense (lower is better)
+BARTHAG: Power rating (chance of beating an average D1 team) (higher is better, 1-100)
+EFG_O: Effective field goal percentage shot (Adjusts for the fact that a three is worth more than a two. Formula is (FG + 0.5*3P)/FGA) (higher is better)
+EFG_D: Effective field goal percentage allowed (lower is better)
+TOR: Turnover rate (lower is better)
+TORD: Steal rate (higher is better)
+ORB: Offensive Rebound Rate (Higher is better)
+DRB: Offensive Rebound Rate Allowed (Lower is better)
+FTR: Free throw rate (how often team shoots free throws) (higher is better)
+FTRD: Free Throw Rate Allowed (lower is better)
+2P_O: Two-Point Shooting Percentage (higher is better)
+2P_D: Two-Point Shooting Percentage Allowed (lower is better)
+3P_O: Three-Point Shooting Percentage (higher is better)
+3P_D: Three-Point Shooting Percentage Allowed (lower is better)
+ADJ_T: Adjusted Tempo(An estimate of possessions per 40 minutes a team would have against the team that wants to play at an average D1 Tempo) (theoretically, higher is better, but that just means you have more possessions in a game)
+WAB: Wins above bubble (bubble refers to the cut off between making the NCAA Tournament and not making it) (higher is better)
+Postseason: Round where the team was eliminated (R64, R32, S16, E8, F4, 2nd, Champion)
+Seed: Seed in the NCAA Tournament (1-16)
+Year: Season (2013-2019)
+Info on the data set can be found at https://www.kaggle.com/andrewsundberg/college-basketball-dataset
+Info about these different statistics can be found at https://www.basketball-reference.com/about/glossary.html
+
+
+```{r}
+# Once again, this is just us looking at different things in the data and trying to get a feel for what we are working with.
+cbb[which(cbb$W == 0), ]
+cbb[which(cbb$TEAM == "Arizona"),]
+unique(cbb$SEED)
+```
+
+```{r}
+# A basic plot between EFG_O and Wins
+plot(cbb$EFG_O, cbb$W)
+```
+
+In this plot we can see that the higher the EFG_O, then in general, the higher the number of wins. This makes sense given the definition of EFG_O. 
+
+```{r}
+# This creates a different variable that takes out some of the non-quantitative variables to make it easier to use. We then look at the correlation of the variables. 
+corcbb <- cbb[,c(-1,-2,-22,-23,-24)]
+cor(corcbb)
+```
+
+Several variables have some decent correlation, such as wins and barthag and wins and games but this shouldn't cause much of a problem in our analysis. 
+
+```{r}
+# A simple linear model with wins as the response variables and all of the other variables except for games as predictors. Games and wins would be too correlated. 
+winlm <- lm(W~.-G, data = corcbb)
+summary(winlm)
+```
+
+This linear model is just basic. We aren't actually going to use wins as our response variable because we want to predict how far you will go in the postseason, not how many games you will win. We just wanted to see what would happen with this for fun. 
+
+We are going to make two models, the first includes teams that did not make the NCAA tournament, likely were not good enough to qualify. The second takes these teams out and just looks at the teams that qualified for the March Madness tournament. 
+```{r}
+#Model 1
+#Create a new data frame that we will manipulate for our first model. We call this cbbd.
+cbbd <- as.data.frame(cbb)
+
+#Create a new vector in the data frame called postnum. This will be the column that we use as a response variable and change it to numeric values. We keep the original column as a check. 
+cbbd$postnum <- (cbb$POSTSEASON)
+
+#For this model, since we are keeping NAs but still want to quantify them, we will give any team that received an NA a value of 0 for how far they made it in the tournament, considering they did not make it to the tournament at all. 
+cbbd[is.na(cbbd)] <- 0
+
+#We transform the BARTHAG variable (Power Rating) by multiplying it by 100 to help normalize it with the rest of the data.
+cbbd$power <- cbbd$BARTHAG * 100
+
+#We now replace each descriptor of how far the team went in the tournament with their respective numeric value. Higher is better. 
+cbbd$postnum <- replace(cbbd$postnum, which(cbbd$POSTSEASON== "Champions"), 8)
+cbbd$postnum <- replace(cbbd$postnum, which(cbbd$POSTSEASON== "2ND"), 7)
+cbbd$postnum <- replace(cbbd$postnum, which(cbbd$POSTSEASON== "F4"), 6)
+cbbd$postnum <- replace(cbbd$postnum, which(cbbd$POSTSEASON== "E8"), 5)
+cbbd$postnum <- replace(cbbd$postnum, which(cbbd$POSTSEASON== "S16"), 4)
+cbbd$postnum <- replace(cbbd$postnum, which(cbbd$POSTSEASON== "R32"), 3)
+cbbd$postnum <- replace(cbbd$postnum, which(cbbd$POSTSEASON== "R64"), 2)
+cbbd$postnum <- replace(cbbd$postnum, which(cbbd$POSTSEASON== "R68"), 1)
+cbbd$postnum <- as.numeric(cbbd$postnum)
+
+#We make a linear model, omitting some predictors we do not consider important for simplification purposes.
+lm1 <- lm(postnum~.-G-CONF-TEAM-W-YEAR-POSTSEASON-`2P_D`-`3P_D`, data = cbbd)
+summary(lm1)
+```
+
+We can see that with postnum as a response variable, ADJOE, ADJDE, BARTHAG, EFG_O, TOR, ORB, FTR, WAB and SEED are all highly significant. DRB, FTRD, 2p_O, 3P_O are all somewhat significant. Power gets dropped because of the collinearity with BARTHAG. We will use power from now on. 
+
+```{r}
+#Model 2
+#For this model, we make a new data frame from the original cbb data, but delete every row that has an NA value in it. This lowers our data to 476 rows.
+cbbb <- na.omit(cbb)
+
+#We again normalize the power rating variable.
+cbbb$power <- cbbb$BARTHAG * 100
+
+cbbb$postnum <- (cbbb$POSTSEASON)
+
+#Follow the same steps as model 1.
+cbbb$postnum <- replace(cbbb$postnum, which(cbbb$POSTSEASON== "Champions"), 8)
+cbbb$postnum <- replace(cbbb$postnum, which(cbbb$POSTSEASON== "2ND"), 7)
+cbbb$postnum <- replace(cbbb$postnum, which(cbbb$POSTSEASON== "F4"), 6)
+cbbb$postnum <- replace(cbbb$postnum, which(cbbb$POSTSEASON== "E8"), 5)
+cbbb$postnum <- replace(cbbb$postnum, which(cbbb$POSTSEASON== "S16"), 4)
+cbbb$postnum <- replace(cbbb$postnum, which(cbbb$POSTSEASON== "R32"), 3)
+cbbb$postnum <- replace(cbbb$postnum, which(cbbb$POSTSEASON== "R64"), 2)
+cbbb$postnum <- replace(cbbb$postnum, which(cbbb$POSTSEASON== "R68"), 1)
+cbbb$postnum <- as.numeric(cbbb$postnum)
+
+#Make a new linear model and evaluate.
+lm2 <- lm(postnum~.-G-CONF-TEAM-W-YEAR-POSTSEASON-`2P_D`-`3P_D`-BARTHAG, data = cbbb)
+summary(lm2)
+
+```
+
+```{r}
+# This chunk downloads tidyverse, leaps and caret if they are not already downloaded on your computer
+if(!require(tidyverse)){
+  install.packages('tidyverse')
+  library(tidyverse)
+}
+if(!require(leaps)){
+  install.packages('leaps')
+  library(leaps)
+}
+if(!require(caret)){
+  install.packages('caret')
+  library(caret)
+}
+```
+
+
+
+```{r}
+#Subset modeling, first with forward.
+modelsf <- regsubsets(postnum~.-G-CONF-TEAM-W-YEAR-POSTSEASON-`2P_D`-`3P_D`-BARTHAG-EFG_D, data = cbbd, nvmax = 15, method = "forward") # We omit EFG_D, 2P_D, 3P_D because our linear model showed they were not significant. Barthag is deleted for collinearity purposes. 
+res.sum <- summary(modelsf) # This saves the summary as a variable
+data.frame( # This gives us a data frame showing which number of variables maximizes the adjusted r squared and minimizes CP and BIC
+  Adj.R2 = which.max(res.sum$adjr2),
+  CP = which.min(res.sum$cp),
+  BIC = which.min(res.sum$bic)
+)
+```
+```{r}
+res.sum
+```
+
+
+Using forward selection, we can see the top six predictors are Wins above the bubble, seed, power, adjusted offensive efficiency, adjusted defensive efficiency and effective field goal percentage shot in that order. We also see that adjusted r squared and CP both choose the 14 variable model while BIC chooses the 10 variable model. 
+
+```{r}
+coef(modelsf, 14)
+```
+
+The coefficients for the 14 variable model are shown above
+
+```{r}
+coef(modelsf, 10)
+```
+The coefficients for the 10 variable model are shown above 
+
+```{r}
+# The idea of this chunk of code is to write a few functions to split the data into test and training data, then test the k-fold cross validation error to find the model that it chooses. A lot more information about this code and the inspiration for it can be found at the following website: http://www.sthda.com/english/articles/37-model-selection-essentials-in-r/155-best-subsets-regression-essentials-in-r/ 
+get_model_formula <- function(id, object, outcome){
+  models <- summary(object)$which[id,-1]
+  predictors <- names(which(models == TRUE))
+  predictors <- paste(predictors, collapse = "+")
+  as.formula(paste0(outcome, "~", predictors))
+}
+get_cv_error <- function(model.formula, data){
+  set.seed(1)
+  train.control <- trainControl(method = "cv", number = 5)
+  cv <- train(model.formula, data = data, method = "lm",
+              trControl = train.control)
+  cv$results$RMSE
+}
+model.ids <- 1:15
+cv.errors <-  map(model.ids, get_model_formula, modelsf, "postnum") %>%
+  map(get_cv_error, data = cbbd) %>%
+  unlist()
+cv.errors
+```
+We can see that the cv error drops dramatically from the fourth to the fifth variable and a little from the fifth to the sixth. After that, the decrease in the errors is really only marginal. So we will use several different models. 
+
+```{r}
+which.min(cv.errors)
+```
+This tells us that the 14 variable model has the lowest cv error. 
+
+```{r}
+coef(modelsf, 14)
+coef(modelsf, 5)
+coef(modelsf, 6)
+```
+This shows us the coefficients for the 14, 4 and 5 variable model. 
+
+```{r}
+# This graphs the models by CP, BIC and adjusted r squared. The point shows what number of variables is optimal by cp, bic or adjusted r squared. 
+par(mfrow = c(2,2))
+plot(res.sum$bic, xlab = "Number of variables", ylab = "BIC", type = "l")
+points(which.min(res.sum$bic), res.sum$bic[which.min(res.sum$bic)], col = "violetred", cex = 2, pch = 20)
+plot(res.sum$cp, xlab = "Number of variables", ylab = "C_p", type = "l")
+points(which.min(res.sum$cp), res.sum$cp[which.min(res.sum$cp)], col = "violetred", cex = 2, pch = 20)
+plot(res.sum$adjr2, xlab = "Number of variables", ylab = "Adjusted R^2", type = "l")
+points(which.max(res.sum$adjr2), res.sum$adjr2[which.max(res.sum$adjr2)], col = "violetred", cex = 2, pch = 20)
+```
+This graph shows that BIC picks the 10 variable model, CP and adjusted r squared choose the 14 variable model. 
+
+```{r}
+# This is the same sort of stuff as above, except now we are doing backward selection instead of forward. 
+modelsba <- regsubsets(postnum~.-G-CONF-TEAM-W-YEAR-POSTSEASON-`2P_D`-`3P_D`-BARTHAG-EFG_D, data = cbbd, nvmax = 15, method = "backward")
+sumback <- summary(modelsba)
+data.frame(
+  Adj.R2 = which.max(sumback$adjr2),
+  CP = which.min(sumback$cp),
+  BIC = which.min(sumback$bic)
+)
+```
+```{r}
+sumback
+```
+
+
+We can see the top 6 variables are seed, adjusted offensive efficiency, adjusted defensive deficiency, power, wins above bubble and effective field goal percentage shot in that order. 
+We can see that just like with forward selection, 14 variables is optimal by adjusted r squared and CP and the 10 variable model is optimal by BIC. 
+
+```{r}
+# Once again, this is doing k-fold cross validation, but this time with our backwards selection model. 
+get_model_formula <- function(id, object, outcome){
+  models <- summary(object)$which[id,-1]
+  predictors <- names(which(models == TRUE))
+  predictors <- paste(predictors, collapse = "+")
+  as.formula(paste0(outcome, "~", predictors))
+}
+get_cv_error <- function(model.formula, data){
+  set.seed(1)
+  train.control <- trainControl(method = "cv", number = 5)
+  cv <- train(model.formula, data = data, method = "lm",
+              trControl = train.control)
+  cv$results$RMSE
+}
+model.ids <- 1:15
+cv.errorsback <-  map(model.ids, get_model_formula, modelsba, "postnum") %>%
+  map(get_cv_error, data = cbbd) %>%
+  unlist()
+cv.errorsback
+```
+In this scenario, with the backward selection, we can see that the cv error decreases a lot from the third to the fourth variable model and decreases again substantially from four to five and from five to six. After that, it is a marginal decrease. 
+```{r}
+which.min(cv.errorsback)
+```
+Once again, the 14 variable model has the lowest cv error. 
+
+```{r}
+coef(modelsba, 4)
+coef(modelsba, 5)
+coef(modelsba, 6)
+coef(modelsba, 14)
+```
+This gives us the coefficients for the 4, 5, 6 and 14 variable models. 
+
+```{r}
+par(mfrow = c(2,2))
+plot(sumback$bic, xlab = "Number of variables", ylab = "BIC", type = "l")
+points(which.min(sumback$bic), sumback$bic[which.min(sumback$bic)], col = "violetred", cex = 2, pch = 20)
+plot(res.sum$cp, xlab = "Number of variables", ylab = "C_p", type = "l")
+points(which.min(sumback$cp), sumback$cp[which.min(sumback$cp)], col = "violetred", cex = 2, pch = 20)
+plot(sumback$adjr2, xlab = "Number of variables", ylab = "Adjusted R^2", type = "l")
+points(which.max(sumback$adjr2), sumback$adjr2[which.max(sumback$adjr2)], col = "violetred", cex = 2, pch = 20)
+```
+Once again, we can see that the adjusted r squared and cp models show that the 14 variable model is the best, and BIC shows the 10 variable model is the best. 
+
+
+
+
+```{r}
+# This does best subset selection, using the exhaustive method. 
+modelsb <- regsubsets(postnum~.-G-CONF-TEAM-W-YEAR-POSTSEASON-`2P_D`-`3P_D`-BARTHAG-EFG_D, data = cbbd, nvmax = 15, method = "exhaustive")
+sumex <- summary(modelsb)
+data.frame(
+  Adj.R2 = which.max(sumex$adjr2),
+  CP = which.min(sumex$cp),
+  BIC = which.min(sumex$bic)
+)
+```
+```{r}
+sumex
+```
+We can see that with the exhaustive model, the top 6 variables are wins above bubble, seed, power, adjusted offensive efficiency, adjusted defensive efficiency and effective field goal percentage shot in that order. 
+With the exhaustive method, we can still see that adjusted r squared and CP choose the 14 variable model and BIC chooses the 10 variable model just as before. 
+
+```{r}
+# This is doing the same thing as before, finding the k-fold CV error but with the exhaustive model. 
+get_model_formula <- function(id, object, outcome){
+  models <- summary(object)$which[id,-1]
+  predictors <- names(which(models == TRUE))
+  predictors <- paste(predictors, collapse = "+")
+  as.formula(paste0(outcome, "~", predictors))
+}
+t_cv_error <- function(model.formula, data){
+  set.seed(1)
+  train.control <- trainControl(method = "cv", number = 5)
+  cv <- train(model.formula, data = data, method = "lm",
+              trControl = train.control)
+  cv$results$RMSE
+}
+model.ids <- 1:15
+cv.errorexhaustive <-  map(model.ids, get_model_formula, modelsb, "postnum") %>%
+  map(get_cv_error, data = cbbd) %>%
+  unlist()
+cv.errorexhaustive
+```
+The CV error drops heavily from 3 to 4, from 4 to 5 and 5 to 6 and then is once again marginal at that point
+
+```{r}
+which.min(cv.errorexhaustive)
+```
+Once again, the 14 variable model has the lowest cv error with the exhaustive method
+
+
+```{r}
+par(mfrow = c(2,2))
+plot(sumex$bic, xlab = "Number of variables", ylab = "BIC", type = "l")
+points(which.min(sumex$bic), sumex$bic[which.min(sumex$bic)], col = "violetred", cex = 2, pch = 20)
+plot(sumex$cp, xlab = "Number of variables", ylab = "C_p", type = "l")
+points(which.min(sumex$cp), sumex$cp[which.min(sumex$cp)], col = "violetred", cex = 2, pch = 20)
+plot(sumex$adjr2, xlab = "Number of variables", ylab = "Adjusted R^2", type = "l")
+points(which.max(sumex$adjr2), sumex$adjr2[which.max(sumex$adjr2)], col = "violetred", cex = 2, pch = 20)
+```
+
+Once again, this just shows the graphs. The CP and adjusted r squared choose the 14 variable model and the BIC chooses the 10 variable model
+
+```{r}
+coef(modelsb, 4)
+coef(modelsb, 5)
+coef(modelsb, 6)
+coef(modelsb, 14)
+```
+
+In each case, the 10 or 14 variable model is chosen by BIC, CP or adjusted r squared. However, the 6 variable model also seems highly effective. We are a little worried about overfitting the data with the 14 variables. Plus, we couldn't find enough data on all 14 variables to test our model. With that being said, we decided to stick with the 6 variable model with WAB, Seed, ADJOE, ADJDE, EFG_O and power as the 6 variables. Each of those were the top 6 variables chosen in forward, backward and exhaustive. After that, each method chose different variables. 
+
+```{r}
+lmfinal14 <- lm(postnum ~ ADJOE+ADJDE+EFG_O+TOR+ORB+DRB+FTR+FTRD+`2P_O`+`3P_O`+ADJ_T+WAB+SEED+power, data = cbbd)
+summary(lmfinal14)
+```
+
+```{r}
+cbbd21 <- as.data.frame(cbb21)
+cbbd21[is.na(cbbd21)] <- 0
+cbbd21$power <- cbbd21$BARTHAG* 100
+cbbd21$round <- 5.863318 + 0.071985 * cbbd21$WAB21 + 0.147116 * cbbd21$SEED21 + 0.244242 * cbbd21$ADJOE - 0.218869 * cbbd21$ADJDE - 0.051421 * cbbd21$EFG_O - 0.102373 * cbbd21$power
+cbbd21$difference <- cbbd21$round - cbbd21$Postnum21
+cbbd21$round4 <- cbbd21$round + 4
+cbbd21 <- cbbd21[order(-cbbd21$round), ]
+cbbd14 <- as.data.frame(cbb21)
+cbbd14$power <- cbbd21$BARTHAG*100
+cbbd14$round <- 4.216607+0.281279*cbbd14$ADJOE -0.212034*cbbd14$ADJDE - 0.195377*cbbd14$EFG_O + 0.093525*cbbd14$TOR - 0.030657*cbbd14$ORB + 0.020267*cbbd14$DRB -0.021994*cbbd14$FTR + 0.088294*cbbd14$WAB21 + 0.151022*cbbd14$SEED21 - 0.105359*cbbd14$power 
+hist(cbbd14$round, xlab = "Estimated Round", main = "Histogram of Estimated Rounds (14 Variables)")
+cbbd14 <- cbbd14[order(-cbbd14$round), ]
+head(cbbd14)
+summary(cbbd14)
+```
+
+
+```{r}
+lmfinal <- lm(postnum ~ WAB + SEED + ADJOE + ADJDE + EFG_O + power, data = cbbd)
+summary(lmfinal)
+```
+
+Now that we have a model, we want to see how well it performs with our 2021 test data.
+```{r}
+#Create a new variable based off the formula above, we will call it Round since it estimates which round the team will make it to in the tournament.
+
+cbbd21 <- as.data.frame(cbb21)
+cbbd21[is.na(cbbd21)] <- 0
+cbbd21$power <- cbbd21$BARTHAG* 100
+cbbd21$round <- 5.863318 + 0.071985 * cbbd21$WAB21 + 0.147116 * cbbd21$SEED21 + 0.244242 * cbbd21$ADJOE - 0.218869 * cbbd21$ADJDE - 0.051421 * cbbd21$EFG_O - 0.102373 * cbbd21$power
+cbbd21$difference <- cbbd21$round - cbbd21$Postnum21
+cbbd21$round4 <- cbbd21$round + 4
+cbbd21 <- cbbd21[order(-cbbd21$round), ]
+head(cbbd21)
+par(mfrow = c(2,2))
+hist(cbbd21$round)
+hist(cbbd21$round4)
+summary(cbbd21)
+```
+
+
+The below chunks of code will split our data into k-nearest neighbors based on WAB. To learn more about k-nearest neighbors and the inspiration for this code, visit the following sites: https://towardsdatascience.com/k-nearest-neighbors-algorithm-with-examples-in-r-simply-explained-knn-1f2c88da405c
+
+
+
+```{r}
+if(!require(ggplot2)){
+  install.packages('ggplot2')
+  library(ggplot2)
+}
+if(!require(plotly)){
+  install.packages('plotly')
+  library(plotly)
+}
+if(!require(gridExtra)){
+  install.packages('gridExtra')
+  library(gridExtra)
+}
+if(!require(leaps)){
+  install.packages('leaps')
+  library(leaps)
+}
+if(!require(psych)){
+  install.packages('psych')
+  library(psych)
+}
+if(!require(NbClust)){
+  install.packages('NbClust')
+  library(NbClust)
+}
+if(!require(sqldf)){
+  install.packages('sqldf')
+  library(sqldf)
+}
+```
+
+
+```{r}
+pairs.panels(x = cbbd21[, c('ADJOE', 'power', 'WAB21', 'ADJDE', 'EFG_O')],
+             ellipses = TRUE,	
+             lm=FALSE, 	
+             smooth = TRUE,	
+             show.points = TRUE, 	
+             density = TRUE,
+             hist.col = "dodgerblue",	
+             breaks = 10		
+)
+```
+
+This code gives us our distance matrix for the k-nearest neighbors.
+```{r}
+d.matrix <- dist(x = cbbd21[,'WAB21'], method="euclidean")
+```
+
+This code fits the model.
+```{r}
+hclust.fit <- hclust(d = d.matrix, method = "ward.D")
+```
+
+Here we assign our clusters.
+```{r}
+cbbd21$mem4 <- cutree(hclust.fit, k = 4)
+```
+
+
+Here we create the centers for our 4 clusters.
+```{r}
+c1mean <- mean(cbbd21$WAB21[cbbd21$mem4==1])
+
+c2mean <- mean(cbbd21$WAB21[cbbd21$mem4==2])
+
+c3mean <- mean(cbbd21$WAB21[cbbd21$mem4==3])
+
+c4mean <- mean(cbbd21$WAB21[cbbd21$mem4==4])
+
+
+cbbd21_centers<- rbind(c1mean, c2mean, c3mean, c4mean)
+cbbd21_centers
+```
+
+
+Now we fit our k-means using the centers we just created.
+```{r}
+kmeans.fit <- kmeans(x=cbbd21[ ,'WAB21'], centers = cbbd21_centers)
+```
+
+
+Now we assign teams to clusters and graph our clusters.
+```{r}
+cbbd21$kmem4_num <- kmeans.fit$cluster
+cbbd21$kmem4 <- factor(kmeans.fit$cluster, labels = c('best', 'mid-low', 'mid-high', 'worst'))
+
+
+ggplotly(ggplot(cbbd21, aes(x = WAB21, y = round, col = kmem4, text = TEAM)) + geom_point() + labs(x= "Wins Above Bubble", y = "Est. Round",title ='Cluster Graph') + scale_color_manual(values=c("seagreen3", "orange", "blue", "red")))
+```
+
+
